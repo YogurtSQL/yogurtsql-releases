@@ -29,6 +29,10 @@ name: Build release
 #   repository's Actions settings). Rust builds use exactly Cargo.lock (--locked), npm uses
 #   package-lock.json (npm ci).
 # - Build and test output stays on the runner (.github/scripts/quiet.sh): these logs are public.
+# - The tests run against every server engine the app supports (MySQL, MariaDB, PostgreSQL, SQL
+#   Server, MongoDB incl. a replica set, DynamoDB Local; SQLite needs none). The run stops if a
+#   server is missing or silent, and fails if any suite didn't run against its server
+#   (.github/scripts/check-fixtures.mjs); the log lists each suite's counts and servers.
 # - Keep debug files and source maps out of this public repository's artifacts. Symbol uploads
 #   are paused until they have a private path to Sentry.
 on:
@@ -58,13 +62,24 @@ env:
 jobs:
   test:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 75
     environment: source
     permissions:
       contents: read
     outputs:
       trusted_pubkey: ${{ steps.trust.outputs.pubkey }}
       commit: ${{ steps.check.outputs.commit }}
+    # The test servers (the services below and "Start the other test servers"). The app's
+    # integration tests skip themselves when their variable is missing, so "Check the test
+    # servers" fails the run unless every one is set and answers, and the Test step's report
+    # fails it unless every suite ran against them. Throwaway logins for throwaway containers.
+    env:
+      SQLROG_TEST_TARGETS: "127.0.0.1:3306:root:testroot,127.0.0.1:3307:root:testroot"
+      SQLROG_PG_TEST_TARGETS: "127.0.0.1:5432:postgres:testroot"
+      SQLROG_MSSQL_TEST_TARGETS: "127.0.0.1:14333:sa:Yogurt!Test2026"
+      SQLROG_MONGO_TEST_TARGETS: "127.0.0.1:27018:root:testroot"
+      SQLROG_MONGO_TEST_REPLSET: "127.0.0.1:27020"
+      SQLROG_DYNAMO_TEST_ENDPOINT: "http://127.0.0.1:18000"
     services:
       mysql:
         image: mysql:8.4
@@ -106,6 +121,24 @@ jobs:
               exit 1
             fi
           fi
+      - name: Start the other test servers
+        # SQL Server 2022, MongoDB 8 (plain with a login, and a one-node replica set) and DynamoDB
+        # Local, as in the source's docs/more-databases.md. Not service containers: those can't
+        # take a command, which the replica set and DynamoDB need. They start now and warm up
+        # while the tools install. The pull prints each image's digest, so the log records it.
+        run: |
+          set -euo pipefail
+          for image in mcr.microsoft.com/mssql/server:2022-latest mongo:8.0 amazon/dynamodb-local:latest; do
+            echo "$image: $(docker pull --quiet "$image")"
+          done
+          docker run --detach --name mssql -e ACCEPT_EULA=Y -e 'MSSQL_SA_PASSWORD=Yogurt!Test2026' \
+            -p 127.0.0.1:14333:1433 mcr.microsoft.com/mssql/server:2022-latest > /dev/null
+          docker run --detach --name mongo -e MONGO_INITDB_ROOT_USERNAME=root -e MONGO_INITDB_ROOT_PASSWORD=testroot \
+            -p 127.0.0.1:27018:27017 mongo:8.0 > /dev/null
+          docker run --detach --name mongo-rs -p 127.0.0.1:27020:27017 mongo:8.0 --replSet rs0 --bind_ip_all > /dev/null
+          docker run --detach --name dynamodb -p 127.0.0.1:18000:8000 amazon/dynamodb-local:latest \
+            -jar DynamoDBLocal.jar -sharedDb -inMemory > /dev/null
+          docker ps --format '{{.Names}}: {{.Status}}'
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -159,21 +192,43 @@ jobs:
           source .github/scripts/quiet.sh
           quiet "apt-get update" sudo apt-get update
           quiet "apt-get install" sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf
+      - name: Initiate the MongoDB replica set
+        # One member, addressed the way the container sees itself (docs/more-databases.md).
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 60); do
+            if docker exec mongo-rs mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok' > /dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          docker exec mongo-rs mongosh --quiet --eval 'rs.initiate({ _id: "rs0", members: [{ _id: 0, host: "127.0.0.1:27017" }] }).ok' > /dev/null
+          echo "replica set rs0 initiated"
+      - name: Check the test servers
+        # Every variable above is set, and every server answers in its own protocol (a TCP connect
+        # alone isn't proof behind Docker's port proxy); the replica set must have a writable
+        # primary. Waits up to 4 minutes for slow starters (SQL Server). Prints engine and
+        # host:port only, and which configurations CI doesn't cover yet (TLS, SSH tunnels).
+        run: node .github/scripts/check-fixtures.mjs check
+      - name: Show the test servers' state
+        if: failure()
+        run: |
+          docker ps --all --format '{{.Names}}: {{.Status}}'
       - name: Test
         working-directory: source
-        env:
-          SQLROG_TEST_TARGETS: "127.0.0.1:3306:root:testroot,127.0.0.1:3307:root:testroot"
-          # PostgreSQL integration tests (tests/integration_pg.rs, from the version with PostgreSQL support).
-          SQLROG_PG_TEST_TARGETS: "127.0.0.1:5432:postgres:testroot"
         run: |
           source "$GITHUB_WORKSPACE/.github/scripts/quiet.sh"
           quiet "npm ci" npm ci
           quiet "npm test" npm test
           quiet "npm run build" npm run build
-          cd src-tauri
-          quiet "cargo test" cargo test --locked
-          # The counts, so a run that quietly tested nothing would show.
-          grep -hE '^test result:|Tests +[0-9]+ passed' "$RUNNER_TEMP"/quiet-*test*.log || true
+          cd src-tauri || exit 1
+          # --no-fail-fast: every suite runs and reports, even after one fails.
+          cargo_status=0
+          quiet "cargo test" cargo test --locked --no-fail-fast || cargo_status=$?
+          # One line per suite: counts, the servers it ran against, what it didn't exercise. Fails
+          # when a suite didn't run, ran nothing, or ran without its server (it would have skipped).
+          report_status=0
+          node "$GITHUB_WORKSPACE/.github/scripts/check-fixtures.mjs" report \
+            "$RUNNER_TEMP/quiet-cargo-test.log" "$RUNNER_TEMP/quiet-npm-test.log" || report_status=$?
+          if [ "$cargo_status" -ne 0 ] || [ "$report_status" -ne 0 ]; then exit 1; fi
 
   build:
     needs: test
