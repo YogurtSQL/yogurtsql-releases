@@ -7,7 +7,7 @@ name: Build release
 # runners in public repositories. The source repository has no workflows and Actions is off there.
 #
 # Start it from the source repository after pushing the tag:
-#   gh workflow run build-release.yml -R SaqibZafar/yogurtsql-releases -f version=0.2.9
+#   gh workflow run build-release.yml -R YogurtSQL/yogurtsql-releases -f version=0.2.9
 # (add -f dry_run=true to test, build and sign without creating or changing any release).
 # Then publish with `node .github/scripts/publish-release.mjs v0.2.9` in the source repository.
 #
@@ -51,7 +51,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  SOURCE_REPO: SaqibZafar/yogurtsql
+  SOURCE_REPO: YogurtSQL/yogurtsql-app
   VERSION: ${{ inputs.version }}
   DRY_RUN: ${{ inputs.dry_run }}
 
