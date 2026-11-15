@@ -132,9 +132,10 @@ jobs:
           fi
           # The app reads downloads.yogurtsql.com first and this repository's feed second.
           endpoints=$(node -p "require('./src-tauri/tauri.conf.json').plugins.updater.endpoints.join(' ')")
-          want="https://downloads.yogurtsql.com/latest.json https://github.com/$GITHUB_REPOSITORY/releases/latest/download/latest.json"
-          if [ "$endpoints" != "$want" ]; then
-            echo "::error::The updater endpoints are \"$endpoints\", not \"$want\"."
+          want1="https://downloads.yogurtsql.com/latest.json https://github.com/$GITHUB_REPOSITORY/releases/latest/download/latest.json"
+          want2="https://downloads.yogurtsql.com/latest.json https://github.com/SaqibZafar/yogurtsql-releases/releases/latest/download/latest.json"
+          if [ "$endpoints" != "$want1" ] && [ "$endpoints" != "$want2" ]; then
+            echo "::error::The updater endpoints are \"$endpoints\", not \"$want1\" or \"$want2\"."
             exit 1
           fi
           # Later jobs build this exact commit, not the tag name, so moving the tag mid-run can't
@@ -389,6 +390,7 @@ jobs:
           sparse-checkout: |
             .github/release-notes.md
             .github/scripts
+            src-tauri/tauri.conf.json
           sparse-checkout-cone-mode: false
       - name: Create the draft release and upload the files
         env:
@@ -414,9 +416,10 @@ jobs:
         run: |
           set -euo pipefail
           tag="v$VERSION"
+          feed_repo=$(node -p "require('./source/src-tauri/tauri.conf.json').plugins.updater.endpoints[1].match(/github\\.com\\/([^/]+\\/[^/]+)/)[1]")
           gh release view "$tag" -R "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > "$RUNNER_TEMP/assets.txt"
           node source/.github/scripts/updater-feed.mjs "$VERSION" \
-            "https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}" \
+            "https://github.com/${feed_repo}/releases/download/${tag}" \
             "$RUNNER_TEMP/release" "$RUNNER_TEMP/assets.txt" "$RUNNER_TEMP/latest.json"
           gh release upload "$tag" -R "$GITHUB_REPOSITORY" "$RUNNER_TEMP/latest.json" --clobber
           echo "Draft $tag is ready. Publish it from the source repository with: node .github/scripts/publish-release.mjs $tag" >> "$GITHUB_STEP_SUMMARY"
