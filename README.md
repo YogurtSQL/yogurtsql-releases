@@ -6,7 +6,7 @@ This repository holds the release builds, a backup copy of every release, and th
 
 ## Download
 
-Get the latest version from **[yogurtsql.com/download](https://yogurtsql.com/download)**. Every release is also here under **[Releases](https://github.com/SaqibZafar/yogurtsql-releases/releases/latest)**:
+Get the latest version from **[yogurtsql.com/download](https://yogurtsql.com/download)**. Every release is also here under **[Releases](https://github.com/YogurtSQL/yogurtsql-releases/releases/latest)**:
 
 | System | File |
 | --- | --- |
@@ -29,7 +29,7 @@ If you installed version 0.2.1 or earlier, it can't find updates anymore. Instal
 
 ## Feedback and security
 
-- Report a bug or ask for a feature in [Issues](https://github.com/SaqibZafar/yogurtsql-releases/issues). Please include your version (**Settings > About**) and your system.
+- Report a bug or ask for a feature in [Issues](https://github.com/YogurtSQL/yogurtsql-releases/issues). Please include your version (**Settings > About**) and your system.
 - Report a security problem privately, not in an issue. See [SECURITY.md](SECURITY.md).
 
 ## License

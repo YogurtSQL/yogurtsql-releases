@@ -166,7 +166,7 @@ jobs:
           # The app reads downloads.yogurtsql.com first and this repository's feed second.
           endpoints=$(node -p "require('./src-tauri/tauri.conf.json').plugins.updater.endpoints.join(' ')")
           want1="https://downloads.yogurtsql.com/latest.json https://github.com/$GITHUB_REPOSITORY/releases/latest/download/latest.json"
-          want2="https://downloads.yogurtsql.com/latest.json https://github.com/SaqibZafar/yogurtsql-releases/releases/latest/download/latest.json"
+          want2="https://downloads.yogurtsql.com/latest.json https://github.com/YogurtSQL/yogurtsql-releases/releases/latest/download/latest.json"
           if [ "$endpoints" != "$want1" ] && [ "$endpoints" != "$want2" ]; then
             echo "::error::The updater endpoints are \"$endpoints\", not \"$want1\" or \"$want2\"."
             exit 1
